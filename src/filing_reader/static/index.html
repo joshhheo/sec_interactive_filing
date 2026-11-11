@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Footnote · Annual filing reader</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">footnote<span> / </span></a>
+    <div class="product">THE NUMBERS, WITH CONTEXT</div>
+    <span class="prototype">Research prototype · 10-K</span>
+  </header>
+  <main>
+    <section class="workspace" aria-label="Filing reader">
+      <div class="toolbar">
+        <div><label for="company">COMPANY</label><select id="company"><option value="AAPL">Apple</option><option value="MSFT">Microsoft</option></select></div>
+        <div><label for="year">FISCAL YEAR</label><select id="year"><option>2025</option><option>2024</option></select></div>
+        <div class="report-meta"><strong id="report-title">Annual report</strong><span id="report-dates">Loading filings…</span></div>
+        <a id="original" target="_blank" rel="noopener noreferrer">Open on SEC ↗</a>
+      </div>
+      <div class="jumpbar"><label for="fact-search">Find a reported item</label><input id="fact-search" placeholder="Search assets, debt, revenue…" autocomplete="off"><span id="search-status"></span></div>
+      <div id="search-results" aria-label="Matching facts" hidden></div>
+      <div class="document-wrap">
+        <iframe id="filing" title="Original annual filing with selectable financial values" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+        <div id="document-status" class="document-status">Preparing the reader…</div>
+      </div>
+      <footer><span class="dot"></span> Original filing layout · Click an underlined number to explore it <span id="filing-status"></span></footer>
+    </section>
+    <aside aria-label="Selected item details">
+      <div class="panel-heading"><span>ITEM EXPLORER</span><span id="cache-status"></span></div>
+      <div id="panel" aria-live="polite">
+        <div class="empty"><span class="empty-icon">↖</span><h1>A number is only<br>the beginning.</h1><p>Select an underlined value in the filing to see its definition and related disclosure passages.</p><div class="steps"><span>01 &nbsp; Understand the amount</span><span>02 &nbsp; Explore related disclosures</span><span>03 &nbsp; Follow the evidence</span></div></div>
+      </div>
+    </aside>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
