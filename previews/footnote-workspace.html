@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>edgarS · Workspace preview</title>
+<style>
+:root { color-scheme: light; --ink:#172620; --muted:#596a62; --line:#dbe3dc; --paper:#fff; --bg:#f3f5f0; --green:#1c4737; --soft:#eaf1e8; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui,sans-serif; }
+button,input { font:inherit; }
+button { cursor:pointer; }
+button:focus-visible,input:focus-visible { outline:2px solid #287857; outline-offset:3px; }
+[hidden] { display:none !important; }
+.workspace { display:grid; grid-template-columns:58px minmax(0,1fr); min-height:100dvh; }
+.sidebar { position:relative; z-index:2; }
+.sidebar nav { position:absolute; inset:0; display:flex; flex-direction:column; gap:5px; padding:10px 7px; background:#ecf0e9; border-right:1px solid var(--line); }
+.rail-item { display:grid; place-items:center; width:43px; min-height:43px; padding:0; border:0; border-radius:11px; background:transparent; color:var(--green); }
+.rail-item:focus-visible { outline-offset:-2px; }
+.rail-group:hover > .rail-item, .rail-item[aria-current] { background:#dce8da; }
+.rail-icon { font-size:21px; line-height:1; }
+.brand { font:700 22px Georgia,serif; margin-bottom:10px; }
+.flyout { position:absolute; top:10px; left:calc(100% - 8px); padding-left:17px; visibility:hidden; opacity:0; transform:translateX(-5px); transition:opacity 150ms ease, transform 150ms ease, visibility 150ms; }
+.flyout-panel { width:min(244px, calc(100vw - 78px)); padding:12px; border:1px solid #d3dfd5; border-radius:15px; background:#f7faf5; box-shadow:0 12px 32px #17262026; }
+.flyout-panel h2 { margin:2px 7px 8px; font-size:15px; }
+.flyout-panel button, .flyout-panel a { display:block; width:100%; padding:7px; border:0; border-radius:7px; background:transparent; color:var(--ink); text-align:left; font:inherit; text-decoration:none; }
+.filing-sections { margin:3px 0 0 13px; padding:0 0 0 8px; border-left:1px solid var(--line); list-style:none; }
+.flyout-panel .filing-entry[aria-current], .flyout-panel button:hover, .flyout-panel a:hover { background:var(--soft); }
+.rail-group:focus-within > .flyout, .rail-group:hover > .flyout { visibility:visible; opacity:1; transform:translateX(0); }
+nav:has(.rail-group:hover) .rail-group:not(:hover) > .flyout { visibility:hidden; opacity:0; }
+main { min-width:0; }
+.view { height:100dvh; }
+.view:not([hidden]) { display:flex; flex-direction:column; }
+.bar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 14px; padding:11px 20px; background:white; border-bottom:1px solid var(--line); }
+.muted, small { color:var(--muted); }
+h1 { margin:0; font-size:16px; font-weight:650; }
+.control { border:1px solid var(--line); border-radius:6px; padding:5px 9px; background:white; color:var(--ink); font-size:14px; text-decoration:none; }
+.filing { width:100%; min-height:0; flex:1; border:0; background:white; }
+.composer-area { padding:10px 14px 16px; background:var(--paper); }
+.composer { display:flex; align-items:center; gap:8px; max-width:640px; margin:auto; padding:5px 6px 5px 15px; border:1px solid #cad8ce; border-radius:28px; background:#f7faf6; box-shadow:0 6px 20px #1726201c; }
+.composer input { flex:1; min-width:0; border:0; background:transparent; color:var(--ink); padding:6px 0; }
+.composer button { flex:0 0 34px; width:34px; height:34px; padding:0; background:var(--green); color:white; border:0; border-radius:50%; }
+.composer button:disabled { opacity:.75; cursor:default; }
+@media (prefers-reduced-motion:reduce) { .flyout { transition:none; } }
+.rows { list-style:none; padding:0; margin:0; background:white; }
+.rows li { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 20px; border-bottom:1px solid var(--line); }
+.rows small { display:block; }
+@media (max-width:560px) { .bar { padding-inline:10px; } }
+</style>
+</head>
+<body>
+<div class="workspace">
+  <aside class="sidebar" aria-label="Workspace sidebar">
+    <nav aria-label="Workspace views">
+      <div class="rail-item brand" aria-label="edgarS">e</div>
+      <div class="rail-group">
+        <button class="rail-item" type="button" data-view="filings" aria-label="Filings" aria-current="location"><span class="rail-icon" aria-hidden="true">▤</span></button>
+        <div class="flyout"><section class="flyout-panel" aria-label="Filings">
+          <h2>Filings</h2>
+          <button type="button" data-view="filings">Apple filing timeline</button>
+          <button class="filing-entry" type="button" data-view="reader" aria-current="page">2025 Form 10-K</button>
+          <ul class="filing-sections" aria-label="2025 Form 10-K sections">
+            <li><a href="apple-2025-10k.html#i719388195b384d85a4e238ad88eba90a_13" target="filing-preview" data-view="reader">Business</a></li>
+            <li><a href="apple-2025-10k.html#i719388195b384d85a4e238ad88eba90a_52" target="filing-preview" data-view="reader">Risk Factors</a></li>
+            <li><a href="apple-2025-10k.html#i719388195b384d85a4e238ad88eba90a_175" target="filing-preview" data-view="reader">Financial Statements</a></li>
+          </ul>
+        </section></div>
+      </div>
+      <div class="rail-group">
+        <button class="rail-item" type="button" data-view="research" aria-label="My Research"><span class="rail-icon" aria-hidden="true">☆</span></button>
+        <div class="flyout"><section class="flyout-panel" aria-label="My Research">
+          <h2>My Research</h2>
+          <button type="button" data-view="research">Apple FY2025 annual report</button>
+        </section></div>
+      </div>
+    </nav>
+  </aside>
+  <main>
+    <section class="view" id="filings" aria-label="Filing timeline" hidden>
+      <header class="bar"><h1>Apple filings</h1></header>
+      <ul class="rows">
+        <li><div><strong>2025 Form 10-K</strong><small>Annual report · Fiscal year ended September 27, 2025</small></div><button class="control" type="button" data-view="reader">Open filing</button></li>
+      </ul>
+    </section>
+
+    <section class="view" id="reader" aria-label="Filing reader">
+      <header class="bar">
+        <h1>Apple <span class="muted">/</span> 2025 Form 10-K</h1>
+      </header>
+      <iframe class="filing" name="filing-preview" title="Apple 2025 Form 10-K" src="apple-2025-10k.html" sandbox="allow-popups"></iframe>
+      <footer class="composer-area">
+        <div class="composer">
+          <input type="text" aria-label="Ask this filing" placeholder="Ask this filing…" readonly>
+          <button type="button" aria-label="Send question" disabled>↑</button>
+        </div>
+      </footer>
+    </section>
+
+    <section class="view" id="research" aria-label="My Research" hidden>
+      <header class="bar"><h1>My Research</h1><span class="muted">Sample saved item</span></header>
+      <ul class="rows">
+        <li><div><strong>Apple FY2025 annual report</strong><small>Saved filing · 10-K</small></div><button class="control" type="button" data-view="reader">Open source</button></li>
+      </ul>
+    </section>
+  </main>
+</div>
+<script>
+  const views = ['filings', 'reader', 'research'];
+  document.querySelectorAll('[data-view]').forEach(button => {
+    button.addEventListener('click', () => {
+      const view = button.dataset.view;
+      views.forEach(id => { document.getElementById(id).hidden = id !== view; });
+      document.querySelectorAll('nav button[data-view]').forEach(tab => {
+        const active = tab.dataset.view === view ||
+          (tab.classList.contains('rail-item') && tab.dataset.view === 'filings' && view === 'reader');
+        if (active) tab.setAttribute('aria-current', tab.dataset.view === view ? 'page' : 'location');
+        else tab.removeAttribute('aria-current');
+      });
+    });
+  });
+</script>
+</body>
+</html>

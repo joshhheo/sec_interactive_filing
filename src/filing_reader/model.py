@@ -21,7 +21,6 @@ class Ollama:
         self.model = model
         self.num_ctx = num_ctx
         self.lock = Lock()
-        self.unavailable = False
 
     def ask(self, instruction, packet, response_type):
         messages = [
@@ -30,31 +29,30 @@ class Ollama:
         ]
         schema = response_type.model_json_schema()
         # Budget conservatively by bytes, reserving room for the template and reply.
-        budget = len(json.dumps(messages, ensure_ascii=False).encode()) + len(json.dumps(schema).encode()) + 4096
+        message_bytes = json.dumps(messages, ensure_ascii=False).encode()
+        schema_bytes = json.dumps(schema).encode()
+        budget = len(message_bytes) + len(schema_bytes) + 4096
         if budget > self.num_ctx:
             raise ModelContextExceeded("filing_exceeds_model_context")
-        body = json.dumps({
+        payload = {
             "model": self.model,
             "stream": False,
             "think": False,
             "format": schema,
             "options": {"temperature": 0, "num_ctx": self.num_ctx, "num_predict": 2048},
             "messages": messages,
-        }).encode()
+        }
+        body = json.dumps(payload).encode()
         request = Request("http://127.0.0.1:11434/api/chat", body, {"Content-Type": "application/json"})
         with self.lock:
-            if self.unavailable:
-                raise ModelUnavailable("ollama_unavailable")
             try:
                 with urlopen(request, timeout=600) as response:
                     result = json.load(response)
             except HTTPError as exc:
-                self.unavailable = True
                 if exc.code == 404:
                     raise ModelUnavailable(f"Model not found. Run: ollama pull {self.model}") from exc
                 raise ModelUnavailable(f"Ollama HTTP error {exc.code}") from exc
             except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-                self.unavailable = True
                 raise ModelUnavailable("Ollama is unavailable or timed out. Open Ollama or run ollama serve.") from exc
         if not isinstance(result, dict):
             raise ModelUnavailable("invalid_model_response")

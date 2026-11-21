@@ -1,60 +1,66 @@
-"""Download and prepare the four allowed 10-Ks. No model calls."""
 
 import argparse
 import hashlib
 import json
 import re
-from urllib.parse import urljoin, urlparse
+from datetime import date, timedelta
+from urllib.parse import quote, urljoin, urlparse
 
 from edgar import Company
-from edgar.httprequests import download_file
 from lxml import etree, html
 
 from setup_sec_identity import setup_sec_identity
-from filing_reader.storage import DATA, VERSION, database, initialize, save_filing
+from filing_reader.storage import VERSION, database, initialize, load_filings, save_filing
 
-COMPANIES = {"AAPL": "Apple", "MSFT": "Microsoft"}
-YEARS = (2024, 2025)
-NS = {"link": "http://www.xbrl.org/2003/linkbase", "xs": "http://www.w3.org/2001/XMLSchema"}
-XLINK = "{http://www.w3.org/1999/xlink}"
-
-
-def read_labels(content, source_url):
-    """Resolve label arcs to concepts; preserve role and source for each text."""
-    root = etree.fromstring(content.encode(), etree.XMLParser(huge_tree=True, encoding="utf-8"))
-    result = {}
-    for group in root.iter("{" + NS["link"] + "}labelLink"):
-        targets = {}
-        texts = {}
-        for locator in group.findall("link:loc", NS):
-            tag_id = locator.get(XLINK + "href").split("#")[-1]
-            targets.setdefault(locator.get(XLINK + "label"), []).append(tag_id.replace("_", ":", 1))
-        for label in group.findall("link:label", NS):
-            texts.setdefault(label.get(XLINK + "label"), []).append({
-                "text": "".join(label.itertext()),
-                "role": label.get(XLINK + "role", "").rsplit("/", 1)[-1],
-                "language": label.get("{http://www.w3.org/XML/1998/namespace}lang", ""),
-                "source": source_url + ("#" + label.get("id") if label.get("id") else ""),
-            })
-        for arc in group.findall("link:labelArc", NS):
-            for tag in targets.get(arc.get(XLINK + "from"), []):
-                result.setdefault(tag, []).extend(texts.get(arc.get(XLINK + "to"), []))
-    # Schema annotations are kept distinct from formal documentation labels.
-    for declaration in root.findall("xs:element", NS):
-        tag = declaration.attrib["id"].replace("_", ":", 1)
-        for note in declaration.findall(".//xs:documentation", NS):
-            result.setdefault(tag, []).append({"text": "".join(note.itertext()),
-                "role": "schema-documentation", "language": "",
-                "source": source_url + "#" + declaration.attrib["id"]})
-    return result
+COMPANIES = {
+    "AAPL": {"name": "Apple", "cik": 320193},
+    "MSFT": {"name": "Microsoft", "cik": 789019},
+}
+YEARS = [2024, 2025]
+PREPARED_YEARS = YEARS.copy()
+PREPARED_YEARS.append(min(YEARS) - 1)
 
 
-def prepare_html(content, source_url, labels):
-    """Keep HTML layout, index inline facts and passages, and remove active content."""
-    document = html.fromstring(content.encode(), parser=html.HTMLParser(encoding="utf-8"))
+def prepare_html(document, source_url):
+    """Annotate the parsed filing document and collect the data behind its clicks."""
     contexts, units = read_contexts_and_units(document)
-    facts = mark_facts(document, source_url, labels, contexts, units)
+    facts = mark_facts(document, source_url, contexts, units)
     passages = mark_passages(document, source_url)
+    footnotes = {}
+    for note in document.iter("ix:footnote"):
+        footnotes[note.get("id")] = note
+
+    facts_by_anchor = {}
+    for fact in facts.values():
+        if "#" in fact["source"]:
+            anchor = fact["source"].split("#", 1)[1]
+            facts_by_anchor[anchor] = fact
+    note_passages = {}
+    for relation in document.iter("ix:relationship"):
+        if relation.get("arcrole") != "http://www.xbrl.org/2003/arcrole/fact-footnote":
+            continue
+        fact_refs = relation.get("fromrefs", "").split()
+        note_refs = relation.get("torefs", "").split()
+        for fact_ref in fact_refs:
+            if fact_ref not in facts_by_anchor:
+                continue
+            for note_ref in note_refs:
+                if note_ref not in note_passages:
+                    note = footnotes[note_ref]
+                    passage_id = "reader-passage-" + str(len(passages))
+                    visible = not any(parent.tag in ("ix:hidden", "ix:header") for parent in note.iterancestors())
+                    if visible:
+                        note.addprevious(html.Element("span", id=passage_id))
+                    passages.append({"id": passage_id, "heading": "Linked footnote",
+                                     "text": note.text_content(), "source": source_url + "#" + note_ref,
+                                     "local": visible})
+                    note_passages[note_ref] = passage_id
+                fact = facts_by_anchor[fact_ref]
+                if "footnotes" not in fact:
+                    fact["footnotes"] = []
+                refs = fact["footnotes"]
+                if note_passages[note_ref] not in refs:
+                    refs.append(note_passages[note_ref])
     rendered = render_reader_html(document, source_url)
     return rendered, facts, passages
 
@@ -71,18 +77,19 @@ def read_contexts_and_units(document):
                 if child_name in ("instant", "startdate", "enddate", "identifier"):
                     context[child_name] = child.text_content().strip()
                 if child_name in ("explicitmember", "typedmember"):
-                    context["dimensions"].append({"axis": child.get("dimension"), "member": child.text_content()})
+                    member = child.text_content().strip()
+                    if child_name == "typedmember":
+                        member = etree.tostring(child[0], encoding="unicode", with_tail=False)
+                    context["dimensions"].append({"axis": child.get("dimension"), "member": member})
             contexts[node.get("id")] = context
         if name == "unit" and node.get("id"):
             units[node.get("id")] = node.text_content().strip()
     return contexts, units
 
 
-def mark_facts(document, source_url, labels, contexts, units):
+def mark_facts(document, source_url, contexts, units):
     facts = {}
-    for node in list(document.iter()):
-        if str(node.tag).lower() != "ix:nonfraction":
-            continue
+    for node in list(document.iter("ix:nonfraction")):
         if any(str(parent.tag).lower() in ("ix:hidden", "ix:header") for parent in node.iterancestors()):
             continue
         fact_id = "reader-fact-" + str(len(facts))
@@ -95,62 +102,69 @@ def mark_facts(document, source_url, labels, contexts, units):
         node.set("data-reader-fact", fact_id)
         node.set("tabindex", "0")
         node.set("role", "button")
-        node.set("title", "Explore definition and related disclosures")
+        node.set("title", "Explore comparison and related disclosures")
         title = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", tag.split(":")[-1])
-        tag_labels = labels.get(tag, [])
-        english = [item for item in tag_labels if item["language"].lower().startswith("en") or not item["language"]]
-        for item in english:
-            if item["role"] == "label":
-                title = item["text"]
-                break
-        definitions = [item for item in english if item["role"] in ("documentation", "schema-documentation")]
-        row = next((parent for parent in node.iterancestors() if parent.tag == "tr"), None)
+        row = node.getparent()
+        while row is not None and row.tag != "tr":
+            row = row.getparent()
+        row_label = ""
+        if row is not None:
+            for cell in row.xpath("./td | ./th"):
+                if any(child.tag == "ix:nonfraction" for child in cell.iterdescendants()):
+                    break
+                row_label = row_label or " ".join(cell.text_content().split())
+        fact_source = source_url
+        if original_id:
+            fact_source += "#" + original_id
+
         facts[fact_id] = {
             "id": fact_id, "tag": tag, "title": title, "display_value": node.text_content(),
             "scale": node.get("scale", "0"), "sign": node.get("sign", ""),
             "format": node.get("format"), "unit": units.get(node.get("unitref"), node.get("unitref", "")),
             "context": contexts.get(node.get("contextref"), {}),
-            "definitions": definitions,
-            "row_text": row.text_content() if row is not None else "",
-            "source": source_url + ("#" + original_id if original_id else ""),
+            "row_label": row_label,
+            "source": fact_source,
         }
     return facts
 
 
-def mark_passages(document, source_url):
+def mark_passages(document, source_url, *, local=True):
     # Passages retain source anchors, including a local anchor when the filing has none.
     passages = []
     heading = "Filing disclosure"
-    for node in list(document.iter()):
-        if node.tag in ("h1", "h2", "h3", "h4", "p", "div"):
-            words = node.text_content().strip()
-            if 5 < len(words) < 170 and (node.tag.startswith("h") or node.find("b") is not None or node.find("strong") is not None):
-                heading = words
-        if node.tag not in ("p", "div", "table"):
+    in_mdna = False
+    for node in document.xpath("//h1 | //h2 | //h3 | //h4 | //p | //li | //div[not(.//div or .//p or .//table or .//li)]"):
+        if any(parent.tag in ("table", "ix:hidden", "ix:header") for parent in node.iterancestors()):
             continue
-        if node.tag == "div" and node.xpath(".//div | .//p | .//table"):
-            continue
-        if any(parent.tag == "table" or str(parent.tag).lower() in ("ix:hidden", "ix:header") for parent in node.iterancestors()):
-            continue
-        if node.tag == "table":
-            lines = []
-            for row in node.xpath(".//tr"):
-                lines.append(" | ".join(cell.text_content() for cell in row.xpath("./td | ./th")))
-            passage_text = "\n".join(lines)
-        else:
-            passage_text = node.text_content()
-        if len(passage_text.strip()) < 80:
+        passage_text = " ".join(node.text_content().split())
+        if len(passage_text) < 170 and not node.xpath(".//a"):
+            if re.match(r"Item (?:2|7)\.\s+Management", passage_text, re.I):
+                in_mdna = True
+            elif re.match(r"Item \d+[A-Z]?\.", passage_text, re.I):
+                in_mdna = False
+            if node.tag.startswith("h") or node.find("b") is not None or node.find("strong") is not None:
+                heading = passage_text
+        if len(passage_text) < 30:
             continue
         passage_id = "reader-passage-" + str(len(passages))
         old_id = node.get("id")
-        marker = html.Element("span", id=passage_id)
-        node.addprevious(marker)
-        passages.append({"id": passage_id, "heading": heading, "text": passage_text,
-                         "source": source_url + ("#" + old_id if old_id else "")})
+        if local:
+            node.addprevious(html.Element("span", id=passage_id))
+        passage_source = source_url
+        if old_id:
+            passage_source += "#" + old_id
+        passages.append({
+            "id": passage_id,
+            "heading": heading,
+            "text": passage_text,
+            "source": passage_source,
+            "local": local,
+            "mdna": in_mdna,
+        })
     return passages
 
 
-def render_reader_html(document, source_url):
+def render_reader_html(document, source_url, *, interactive=True):
     for node in list(document.xpath("//script | //iframe | //object | //embed | //form | //base | //meta | //link")):
         node.drop_tree()
     for node in document.iter():
@@ -178,75 +192,141 @@ def render_reader_html(document, source_url):
     .reader-selected{background:#d9f2ed;outline:2px solid #287a74}
     :target{scroll-margin-top:36px}'''
     head.append(style)
-    script = html.Element("script", src="/static/filing.js")
-    document.append(script)
+    if interactive:
+        script = html.Element("script", src="/static/filing.js")
+        document.append(script)
     return html.tostring(document, encoding="unicode", method="html")
 
 
-def prepare_filing(ticker, year):
-    """Prepare one supported original 10-K; reuse the saved result on subsequent runs."""
-    destination = DATA / f"{ticker}-{year}"
-    destination.mkdir(parents=True, exist_ok=True)
-    existing = destination / "filing.json"
-    if existing.exists():
-        return json.loads(existing.read_text())
-    filing = None
-    for candidate in Company(ticker).get_filings(form="10-K", amendments=False):
-        if str(candidate.period_of_report).startswith(str(year)):
-            filing = candidate
-            break
-    if filing is None:
-        raise ValueError(f"No original {year} 10-K found for {ticker}")
+def current_report_passages(reports, period_end, filed, documents):
+    """Collect nearby 8-K disclosures, including earnings exhibits."""
+    latest = filed + timedelta(days=30)
+    passages = []
+    for report in reports:
+        if not period_end < report.filing_date <= latest:
+            continue
+        for attachment in report.attachments:
+            if attachment.document_type != "8-K" and not attachment.document_type.startswith("EX-99"):
+                continue
+            if not attachment.is_html():
+                continue
+            parser = html.HTMLParser(encoding="utf-8")
+            document = html.fromstring(attachment.content.encode(), parser=parser)
+            document_id = str(len(documents))
+            for passage in mark_passages(document, attachment.url):
+                passage["anchor"] = passage["id"]
+                passage["local"] = False
+                passage["document_id"] = document_id
+                passage["form"] = "8-K"
+                passage["exhibit"] = attachment.document_type
+                passage["id"] = "current-report-" + str(len(passages))
+                passage["filed"] = report.filing_date.isoformat()
+                if "#" not in passage["source"]:
+                    excerpt = " ".join(passage["text"].split()[:8])
+                    passage["source"] += "#:~:text=" + quote(excerpt, safe="").replace("-", "%2D")
+                passages.append(passage)
+            rendered = render_reader_html(document, attachment.url, interactive=False)
+            documents[document_id] = rendered
+    return passages
+
+
+def prepare_amendments(filing, amendments, documents):
+    result = []
+    for amendment in sorted(amendments, key=lambda item: (item.filing_date, item.accession_no)):
+        if amendment.form != filing.form + "/A" or amendment.report_date != filing.report_date:
+            continue
+        attachment = amendment.attachments.primary_html_document
+        parser = html.HTMLParser(encoding="utf-8")
+        document = html.fromstring(attachment.content.encode(), parser=parser)
+        contexts, units = read_contexts_and_units(document)
+        facts = mark_facts(document, attachment.url, contexts, units)
+        for element in document.xpath("//*[@data-reader-fact]"):
+            for attribute in ("data-reader-fact", "tabindex", "role", "title"):
+                del element.attrib[attribute]
+        document_id = str(len(documents))
+        rendered = render_reader_html(document, attachment.url, interactive=False)
+        documents[document_id] = rendered
+        result.append({
+            "form": amendment.form,
+            "filed": amendment.filing_date.isoformat(),
+            "source": attachment.url,
+            "document_id": document_id,
+            "facts": facts,
+        })
+    return result
+
+
+def prepare_filing(ticker, filing, current_reports, amendments, saved):
+    matching_accessions = [
+        amendment.accession_no for amendment in amendments
+        if amendment.form == filing.form + "/A" and amendment.report_date == filing.report_date
+    ]
+    if (saved and saved.get("version") == VERSION
+            and saved.get("amendment_accessions") == matching_accessions):
+        return None
+
     attachment = filing.attachments.primary_html_document
     content = attachment.content
     source_url = attachment.url
-    labels = {}
-    warnings = []
-    # Both custom label locations are supported; official definitions retain their URLs.
-    for item in filing.attachments.query("document_type in ['EX-101.SCH', 'EX-101.LAB']"):
-        for tag, entries in read_labels(item.content, item.url).items():
-            labels.setdefault(tag, []).extend(entries)
-    namespaces = re.findall(r'xmlns:us-gaap\s*=\s*[\"\']([^\"\']+)', content)
-    if namespaces:
-        taxonomy_year = namespaces[0].rstrip("/").split("/")[-1]
-        for kind in ("lab", "doc"):
-            url = f"https://xbrl.fasb.org/us-gaap/{taxonomy_year}/elts/us-gaap-{kind}-{taxonomy_year}.xml"
-            cache = DATA / f"us-gaap-{kind}-{taxonomy_year}.xml"
-            try:
-                if not cache.exists():
-                    cache.write_text(download_file(url, as_text=True))
-                for tag, entries in read_labels(cache.read_text(), url).items():
-                    labels.setdefault(tag, []).extend(entries)
-            except Exception as error:
-                warnings.append(f"Could not load {kind} taxonomy labels: {type(error).__name__}. Definitions may be unavailable.")
-    rendered, facts, passages = prepare_html(content, source_url, labels)
-    payload = {"id": f"{ticker}-{year}", "ticker": ticker, "company": COMPANIES[ticker], "year": year,
-        "period_end": str(filing.period_of_report), "filed": str(filing.filing_date),
+    document = html.fromstring(content.encode(), parser=html.HTMLParser(encoding="utf-8"))
+    focus = {}
+    for node in document.iter("ix:nonnumeric"):
+        name = node.get("name")
+        if name in ("dei:DocumentFiscalYearFocus", "dei:DocumentFiscalPeriodFocus"):
+            focus[name] = node.text_content().strip()
+    year = int(focus["dei:DocumentFiscalYearFocus"])
+    period = focus["dei:DocumentFiscalPeriodFocus"]
+    if year not in PREPARED_YEARS:
+        return None
+    filing_id = f"{ticker}-{year}"
+    if period != "FY":
+        filing_id += f"-{period}"
+    rendered, facts, passages = prepare_html(document, source_url)
+    documents = {}
+    related = []
+    if year in YEARS:
+        period_end = date.fromisoformat(str(filing.report_date))
+        related = current_report_passages(current_reports, period_end, filing.filing_date, documents)
+    revisions = prepare_amendments(filing, amendments, documents)
+    payload = {"id": filing_id, "ticker": ticker, "company": COMPANIES[ticker]["name"], "year": year,
+        "form": filing.form, "fiscal_period": period, "version": VERSION,
+        "period_end": str(filing.report_date), "filed": str(filing.filing_date),
         "accession": filing.accession_no, "source": source_url, "facts": facts,
-        "passages": passages, "warnings": warnings,
-        "revision": hashlib.sha256((VERSION + content + json.dumps(labels, sort_keys=True)).encode()).hexdigest()}
-    (destination / "original.html").write_text(content)
-    (destination / "reader.html").write_text(rendered)
-    existing.write_text(json.dumps(payload))
-    return payload
+        "passages": passages, "current_reports": related,
+        "amendments": revisions, "amendment_accessions": matching_accessions,
+        "source_documents": list(documents),
+        "revision": hashlib.sha256((VERSION + content + json.dumps(related, sort_keys=True)).encode()).hexdigest()}
+    documents["main"] = rendered
+    return payload, documents
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--files-only", action="store_true", help="Download/prepare without connecting to PostgreSQL")
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__).parse_args()
     setup_sec_identity()
-    engine = None if args.files_only else database()
-    if engine is not None:
-        initialize(engine)
-    for ticker in COMPANIES:
-        for year in YEARS:
-            payload = prepare_filing(ticker, year)
-            if engine is not None:
-                save_filing(engine, payload)
+    engine = database()
+    initialize(engine)
+    saved_filings = {item["accession"]: item for item in load_filings(engine)}
+    for ticker, company in COMPANIES.items():
+        entity = Company(company["cik"])
+        amendments = list(entity.get_filings(form=["10-K/A", "10-Q/A"], amendments=True))
+        filings = list(entity.get_filings(
+            form=["10-K", "10-Q", "8-K"], amendments=False,
+            date=f"{min(PREPARED_YEARS) - 1}-01-01:{max(YEARS) + 1}-04-30",
+        ))
+        current_reports = []
+        for filing in filings:
+            if filing.form == "8-K":
+                current_reports.append(filing)
+        for filing in filings:
+            if filing.form not in ("10-K", "10-Q"):
+                continue
+            saved = saved_filings.get(filing.accession_no)
+            prepared = prepare_filing(ticker, filing, current_reports, amendments, saved)
+            if prepared is None:
+                continue
+            payload, documents = prepared
+            save_filing(engine, payload, documents)
             print(f"Prepared {payload['id']}: {len(payload['facts'])} facts, {len(payload['passages'])} passages", flush=True)
-            for warning in payload["warnings"]:
-                print(warning, flush=True)
 
 
 if __name__ == "__main__":

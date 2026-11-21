@@ -2,38 +2,107 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Footnote · Annual filing reader</title>
+  <title>edgarS · SEC filing reader</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/">footnote<span> / </span></a>
-    <div class="product">THE NUMBERS, WITH CONTEXT</div>
-    <span class="prototype">Research prototype · 10-K</span>
-  </header>
-  <main>
-    <section class="workspace" aria-label="Filing reader">
-      <div class="toolbar">
-        <div><label for="company">COMPANY</label><select id="company"><option value="AAPL">Apple</option><option value="MSFT">Microsoft</option></select></div>
-        <div><label for="year">FISCAL YEAR</label><select id="year"><option>2025</option><option>2024</option></select></div>
-        <div class="report-meta"><strong id="report-title">Annual report</strong><span id="report-dates">Loading filings…</span></div>
-        <a id="original" target="_blank" rel="noopener noreferrer">Open on SEC ↗</a>
+  <div class="workspace">
+    <nav class="rail" aria-label="Workspace">
+      <button id="open-home" class="rail-brand" type="button" aria-label="Home" data-label="Home" aria-controls="home" aria-current="page">e</button>
+      <button id="open-filing-search" class="rail-icon" type="button" aria-label="Search filings" data-label="Search filings" aria-controls="search-page"><span class="search-icon" aria-hidden="true"></span></button>
+      <div class="recent-nav">
+        <button id="open-filings" class="rail-icon" type="button" aria-label="Recent filings" aria-controls="filings-page">▤</button>
+        <div class="recent-flyout"><div>
+          <strong>Recent filings</strong>
+          <div id="recent-shortcuts"></div>
+        </div></div>
       </div>
-      <div class="jumpbar"><label for="fact-search">Find a reported item</label><input id="fact-search" placeholder="Search assets, debt, revenue…" autocomplete="off"><span id="search-status"></span></div>
-      <div id="search-results" aria-label="Matching facts" hidden></div>
-      <div class="document-wrap">
-        <iframe id="filing" title="Original annual filing with selectable financial values" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
-        <div id="document-status" class="document-status">Preparing the reader…</div>
-      </div>
-      <footer><span class="dot"></span> Original filing layout · Click an underlined number to explore it <span id="filing-status"></span></footer>
-    </section>
-    <aside aria-label="Selected item details">
-      <div class="panel-heading"><span>ITEM EXPLORER</span><span id="cache-status"></span></div>
-      <div id="panel" aria-live="polite">
-        <div class="empty"><span class="empty-icon">↖</span><h1>A number is only<br>the beginning.</h1><p>Select an underlined value in the filing to see its definition and related disclosure passages.</p><div class="steps"><span>01 &nbsp; Understand the amount</span><span>02 &nbsp; Explore related disclosures</span><span>03 &nbsp; Follow the evidence</span></div></div>
-      </div>
-    </aside>
-  </main>
+    </nav>
+    <main>
+      <p id="search-status" role="status">Loading filings…</p>
+      <section id="home" class="workspace-page" aria-labelledby="home-title">
+        <h1 id="home-title" tabindex="-1">edgarS</h1>
+        <p>Read and investigate SEC filings.</p>
+        <section id="home-continue" class="home-section" aria-labelledby="continue-heading" hidden>
+          <h2 id="continue-heading">Continue reading</h2>
+          <button id="home-resume" class="filing-result" type="button" hidden></button>
+        </section>
+        <section class="home-section" aria-labelledby="latest-heading">
+          <h2 id="latest-heading">Latest filings</h2>
+          <p class="muted">Recent reports from the demo companies</p>
+          <ul id="home-filings" class="home-feed"></ul>
+        </section>
+        <p class="home-tip"><strong>Quick tip</strong> Highlight a passage to explain it or ask a follow-up.</p>
+        <details class="home-guide">
+          <summary>How to use edgarS</summary>
+          <ol>
+            <li>Open a report from the feed or use the magnifying glass to search.</li>
+            <li>Click an underlined figure, highlight a passage, or ask the filing a question.</li>
+            <li>Use citations to jump back to the evidence in the filing.</li>
+          </ol>
+        </details>
+      </section>
+      <section id="search-page" class="workspace-page" aria-labelledby="search-title" hidden>
+        <div class="home-heading">
+          <h1 id="search-title">Search filings</h1>
+          <button id="resume-filing" class="link-button" type="button" hidden>Back to open filing</button>
+        </div>
+        <form id="filing-search" role="search" aria-label="Search filings">
+          <div class="filing-filters">
+            <label>Company
+              <input id="filing-query" type="search" list="filing-companies" placeholder="Company or ticker" autocomplete="off">
+            </label>
+            <datalist id="filing-companies"></datalist>
+            <label>Filing form
+              <select id="filing-form"><option value="">All forms</option></select>
+            </label>
+            <label>Filed from <input id="filed-from" type="date"></label>
+            <label>Filed through <input id="filed-through" type="date"></label>
+          </div>
+          <div id="filing-search-results"></div>
+          <p id="filing-search-status" role="status"></p>
+        </form>
+      </section>
+      <section id="filings-page" class="workspace-page" aria-labelledby="filings-title" hidden>
+        <h1 id="filings-title" tabindex="-1">Recent filings</h1>
+        <div id="filing-history"></div>
+      </section>
+      <section id="viewer" aria-label="Filing reader" hidden>
+        <header class="toolbar">
+          <div class="report-meta"><strong id="report-title" tabindex="-1"></strong><span id="report-dates"></span></div>
+          <div id="evidence-tools" aria-label="Filing evidence" hidden>
+            <span id="evidence-position" aria-live="polite"></span>
+            <button id="previous-evidence" type="button">Previous</button>
+            <button id="next-evidence" type="button">Next</button>
+            <button id="exit-evidence" type="button">Return to reading</button>
+          </div>
+        </header>
+        <div id="amendments"></div>
+        <div class="document-wrap">
+          <iframe id="filing" title="Original filing" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+          <div id="document-status" class="document-status" role="status"></div>
+        </div>
+        <footer class="composer-area">
+          <div class="composer">
+            <div id="answer" aria-live="polite" hidden></div>
+            <div id="question-context" hidden><span id="context-label"></span><button id="clear-context" type="button" aria-label="Clear question context">×</button></div>
+            <form id="ask">
+              <input id="question" aria-label="Ask this filing" placeholder="Ask this filing…" maxlength="600" required>
+              <button type="submit" aria-label="Send question">↑</button>
+            </form>
+          </div>
+        </footer>
+      </section>
+    </main>
+  </div>
+  <div id="fact-popup" role="region" aria-label="Inspect selection" hidden>
+    <button id="close-fact" type="button" aria-label="Close inspection">×</button>
+    <div id="panel" aria-live="polite"></div>
+  </div>
+  <dialog id="source-dialog">
+    <header><strong id="source-title"></strong><button id="close-source" type="button">Close</button></header>
+    <iframe id="source-frame" title="Source document" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>
+  </dialog>
   <script src="/static/app.js"></script>
 </body>
 </html>

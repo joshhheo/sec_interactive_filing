@@ -8,8 +8,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data" / "filing_reader"
-VERSION = "reader-1"
+VERSION = "reader-7"
 
 
 def database():
@@ -40,32 +39,84 @@ def initialize(engine):
             )
         """))
 
-
-def save_filing(engine, payload):
-    with engine.begin() as connection:
         connection.execute(text("""
-            INSERT INTO reader_filings(id, payload) VALUES (:id, CAST(:payload AS JSONB))
-            ON CONFLICT(id) DO UPDATE SET payload = EXCLUDED.payload
-        """), {"id": payload["id"], "payload": json.dumps(payload)})
+            CREATE TABLE IF NOT EXISTS reader_documents (
+                filing_id TEXT NOT NULL REFERENCES reader_filings(id),
+                document_id TEXT NOT NULL,
+                html TEXT NOT NULL,
+                PRIMARY KEY (filing_id, document_id)
+            )
+        """))
 
 
-def load_filing(engine, filing_id):
+def save_filing(engine, payload, documents):
+    query = text("""
+        INSERT INTO reader_filings(id, payload) VALUES (:id, CAST(:payload AS JSONB))
+        ON CONFLICT(id) DO UPDATE SET payload = EXCLUDED.payload
+    """)
+    parameters = {"id": payload["id"], "payload": json.dumps(payload)}
+    with engine.begin() as connection:
+        connection.execute(query, parameters)
+        connection.execute(
+            text("DELETE FROM reader_documents WHERE filing_id = :filing_id"),
+            {"filing_id": payload["id"]},
+        )
+        insert_document = text("""
+            INSERT INTO reader_documents (filing_id, document_id, html)
+            VALUES (:filing_id, :document_id, :html)
+        """)
+        rows = [
+            {"filing_id": payload["id"], "document_id": document_id, "html": content}
+            for document_id, content in documents.items()
+        ]
+        connection.execute(insert_document, rows)
+
+
+def load_document(engine, filing_id, document_id):
+    query = text("""
+        SELECT html FROM reader_documents
+        WHERE filing_id = :filing_id AND document_id = :document_id
+    """)
     with engine.connect() as connection:
-        return connection.execute(text("SELECT payload FROM reader_filings WHERE id=:id"),
-                                  {"id": filing_id}).scalar_one_or_none()
+        return connection.execute(query, {
+            "filing_id": filing_id,
+            "document_id": document_id,
+        }).scalar_one_or_none()
+
+
+def load_filings(engine):
+    query = text("""
+        SELECT filing.payload
+        FROM reader_filings AS filing
+        JOIN reader_documents AS document
+          ON document.filing_id = filing.id AND document.document_id = 'main'
+        ORDER BY filing.id
+    """)
+    with engine.connect() as connection:
+        rows = connection.execute(query)
+        return rows.scalars().all()
 
 
 def cached_explanation(connection, filing_id, fact_id, version):
-    return connection.execute(text("""
+    query = text("""
         SELECT payload FROM reader_explanations
         WHERE filing_id=:filing AND fact_id=:fact AND version=:version
-    """), {"filing": filing_id, "fact": fact_id, "version": version}).scalar_one_or_none()
+    """)
+    parameters = {"filing": filing_id, "fact": fact_id, "version": version}
+    result = connection.execute(query, parameters)
+    return result.scalar_one_or_none()
 
 
 def save_explanation(connection, filing_id, fact_id, version, payload):
-    connection.execute(text("""
+    query = text("""
         INSERT INTO reader_explanations(filing_id, fact_id, version, payload)
         VALUES (:filing, :fact, :version, CAST(:payload AS JSONB))
         ON CONFLICT(filing_id, fact_id, version) DO NOTHING
-    """), {"filing": filing_id, "fact": fact_id, "version": version,
-           "payload": json.dumps(payload)})
+    """)
+    parameters = {
+        "filing": filing_id,
+        "fact": fact_id,
+        "version": version,
+        "payload": json.dumps(payload),
+    }
+    connection.execute(query, parameters)

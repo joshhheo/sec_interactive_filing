@@ -10,8 +10,5 @@ __pycache__/
 # Downloaded and prepared filing-reader documents
 data/filing_reader/
 
-# Local backup of the retired financial-comparison project
-archive/
-
 # Local project handoff
 /HANDOFF.md
